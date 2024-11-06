@@ -289,10 +289,18 @@ impl<C: ServerContext> HttpServerStarter<C> {
                         (sock, remote_addr) = http_acceptor.accept() => {
                             let handler = make_service
                                 .make_http_request_handler(remote_addr);
+
+                            // An example implementation of a tower-http middleware.
+                            let svc = tower::ServiceBuilder::new().layer(
+                                tower_http::compression::CompressionLayer::new()
+                                    .gzip(true)
+                            );
+                            let svc = hyper_util::service::TowerToHyperService::new(svc.service(handler));
+
                             let fut = builder
                                 .serve_connection_with_upgrades(
                                     TokioIo::new(sock),
-                                    handler,
+                                    svc,
                                 );
                             let fut = graceful.watch(fut.into_owned());
                             tokio::spawn(fut);
@@ -1033,6 +1041,37 @@ impl<C: ServerContext> Service<Request<hyper::body::Incoming>>
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn call(&self, req: Request<hyper::body::Incoming>) -> Self::Future {
+        Box::pin(http_request_handle_wrap(
+            Arc::clone(&self.server),
+            self.remote_addr,
+            req,
+        ))
+    }
+}
+
+/// Implemented to allow tower-http middleware.
+impl<C: ServerContext> Clone for ServerRequestHandler<C> {
+    fn clone(&self) -> Self {
+        Self { server: self.server.clone(), remote_addr: self.remote_addr }
+    }
+}
+
+/// Implemented to allow tower-http middleware.
+impl<C: ServerContext> tower::Service<Request<hyper::body::Incoming>>
+    for ServerRequestHandler<C>
+{
+    type Response = Response<Body>;
+    type Error = GenericError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<hyper::body::Incoming>) -> Self::Future {
         Box::pin(http_request_handle_wrap(
             Arc::clone(&self.server),
             self.remote_addr,

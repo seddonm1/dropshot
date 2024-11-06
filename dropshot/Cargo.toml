@@ -45,6 +45,8 @@ slog-term = "2.9.1"
 thiserror = "1.0.67"
 tokio-rustls = "0.25.0"
 toml = "0.8.19"
+tower = "0.5.1"
+tower-http = { version = "0.6.1", features = ["compression-gzip"] }
 waitgroup = "0.1.2"
 
 [dependencies.chrono]
